@@ -12,3 +12,4 @@ $$n \in \{ 8, 16, 32, 64, 128 \}.$$
 
 ## Learning rate
 
+- Baseline: lr constante fixo, pra fazer ablação. Depois scheduler.

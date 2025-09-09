@@ -32,10 +32,9 @@ model:
   num_classes: 37
 
 optim:
-  name: adamw
-  lr: 3e-4
+  name: sgd
+  lr: 0.1
   weight_decay: 1e-4
-  betas: [0.9, 0.999]
   momentum: 0.9
   nesterov: true
 
