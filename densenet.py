@@ -12,7 +12,7 @@ class DenseLayer(nn.Module):
         self.dropout = dropout
         inter_channels = 4 * growth_rate
         self.norm1 = nn.BatchNorm2d(in_channels)
-        self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size=1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, inter_channels, kernel_size=1, bias=False)
         self.norm2 = nn.BatchNorm2d(inter_channels)
         self.conv2 = nn.Conv2d(
             inter_channels, growth_rate, kernel_size=3, padding=1, bias=False
@@ -35,7 +35,7 @@ class DenseBlock(nn.Module):
         layers = []
         channels = in_channels
         for _ in range(num_layers):
-            layers.append(DenseLayer(channels, growth_rate))
+            layers.append(DenseLayer(channels, growth_rate, dropout))
             channels += growth_rate
         self.block = nn.ModuleList(layers)
         self.out_channels = channels
@@ -130,8 +130,9 @@ def densenet121(num_classes: int = 37) -> DenseNet:
 
 
 if __name__ == "__main__":
-    model = densenet121(num_classes=1000)
+    model = densenet121(num_classes=37)
+    model.eval()
     x = torch.randn(2, 3, 224, 224)
     logits = model(x)
-    print("Output shape:", logits.shape)  # Expect [2, 1000]
+    print("Output shape:", logits.shape)  # Expect [2, 37]
     print("Param count (M):", sum(p.numel() for p in model.parameters()) / 1e6)
