@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torchvision import datasets
 from torch.utils.data import DataLoader, Subset
@@ -8,9 +10,11 @@ def get_loaders(config, root="data/"):
     imagenet_mean = (0.485, 0.456, 0.406)
     imagenet_std = (0.229, 0.224, 0.225)
 
-    size = config.img_size
-    bs = config.batch_size
-    j = config.num_workers
+    size = config.data.img_size
+    bs = config.data.batch_size
+    j = config.data.num_workers
+    val_split = config.data.val_split
+    seed = config.seed
 
     train_transform = v2.Compose(
         [
@@ -38,8 +42,8 @@ def get_loaders(config, root="data/"):
     base = datasets.OxfordIIITPet(
         root=root, split="trainval", target_types="category", download=True
     )
-    g = torch.Generator().manual_seed(42)
-    n_val = int(0.1 * len(base))
+    g = torch.Generator().manual_seed(seed)
+    n_val = int(val_split * len(base))
     perm = torch.randperm(len(base), generator=g)
     val_idx, trn_idx = perm[:n_val], perm[n_val:]
 
@@ -125,3 +129,10 @@ def load_checkpoint(path, model, optim=None, scaler=None, ema_model=None):
     model.eval()
 
     return step, epoch, model, optim, scaler, ema_model
+
+
+def print_steps_info(loader: DataLoader):
+    batches_per_epoch = len(loader)
+    samples_per_epoch = len(loader.dataset)
+    steps_per_epoch = math.ceil(batches_per_epoch)
+    print(f"samples/epoch={samples_per_epoch} | batches/epoch={batches_per_epoch}")
