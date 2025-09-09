@@ -8,7 +8,7 @@ $$n \in \{ 8, 16, 32, 64, 128 \}.$$
 
 ## Num. epochs
 
-...
+- Relativo com o tamanho do batch.
 
 ## Learning rate
 
