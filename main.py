@@ -3,13 +3,28 @@ from typing import Tuple
 from omegaconf import OmegaConf, DictConfig
 import hydra
 
+import os
 import numpy as np
 import torch
 from torch.nn import Module
 from torch.utils.data import DataLoader
 
+import wandb
+
 from densenet import densenet121
-from utils import get_loaders
+from utils import get_loaders, print_steps_info
+
+from hydra.utils import get_original_cwd
+from pathlib import Path
+
+
+def _data_root_and_download(cfg):
+    root = Path(get_original_cwd()) / cfg.data.root
+    root.mkdir(parents=True, exist_ok=True)
+    download = bool(cfg.data.download) and not any(root.iterdir())
+    cfg.data.root = str(root)
+    cfg.data.download = download
+    return cfg
 
 
 def set_flags(cfg: DictConfig):
@@ -108,11 +123,14 @@ def train(cfg: DictConfig) -> Module:
         model = torch.compile(model)
 
     loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=lbls)
-    train_loader, val_loader, test_loader = get_loaders(cfg)
+    cfg = _data_root_and_download(cfg)
+    train_loader, val_loader, test_loader = get_loaders(cfg, root=cfg.data.root)
     optim, scaler = make_optim_utils(cfg, model)
 
+    print_steps_info(train_loader)
+
     clip_grad_fn = lambda m: torch.nn.utils.clip_grad_norm_(
-        m.parameters(), cfg.train.max_grad_norm
+        m.parameters(), cfg.trainer.grad_clip_norm
     )
 
     step = 0
@@ -142,8 +160,34 @@ def train(cfg: DictConfig) -> Module:
             f"val_loss={val_loss:.4f} val_acc={val_acc:.2%}"
         )
 
+        if wandb.run is not None:
+            wandb.log(
+                {
+                    "train/epoch_loss": float(train_loss),
+                    "train/epoch_acc": float(train_acc),
+                    "val/loss": float(val_loss),
+                    "val/acc": float(val_acc),
+                    "epoch": epoch,
+                    "step": step,
+                },
+                step=step,
+            )
+
     test_loss, test_acc = eval(cfg, model, test_loader, loss_fn)
     print(f"Test_loss={test_loss:.4f} test_acc={test_acc:.2%}")
+
+    if wandb.run is not None:
+        wandb.log(
+            {
+                "test/loss": float(test_loss),
+                "test/acc": float(test_acc),
+                "step": step,
+            },
+            step=step,
+        )
+        wandb.summary["test/loss"] = float(test_loss)
+        wandb.summary["test/acc"] = float(test_acc)
+
     return model
 
 
@@ -153,14 +197,41 @@ def default_log(
     print(
         f"Step: {step} ({epoch}) | Loss: {true_loss:.5f} | Grad: {grad:.5f} | Lr: {lr:.3e}"
     )
+    if wandb.run is not None:
+        wandb.log(
+            {
+                "train/step_loss": float(true_loss),
+                "train/grad_norm": float(grad),
+                "lr": float(lr),
+                "epoch": epoch,
+                "step": step,
+            },
+            step=step,
+        )
 
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig) -> None:
     assert cfg.device == "cuda"
 
+    project = os.environ.get("WANDB_PROJECT", "runs")
+    name = os.environ.get("WANDB_NAME", None)
+    mode = "online"
+
+    wandb.init(
+        project=project,
+        name=name,
+        config=OmegaConf.to_container(cfg, resolve=True),
+        mode=mode,
+    )
+
     set_flags(cfg)
-    model = train(cfg)
+    try:
+        _ = train(cfg)
+    finally:
+        # Ensure the run closes cleanly even on exceptions
+        if wandb.run is not None:
+            wandb.finish()
 
 
 if __name__ == "__main__":

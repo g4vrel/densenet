@@ -16,7 +16,7 @@ hydra:
 data:
   root: data/
   img_size: 224
-  batch_size: 64
+  batch_size: 32
   num_workers: 8
   pin_memory: true
   persistent_workers: true
@@ -38,19 +38,9 @@ optim:
   momentum: 0.9
   nesterov: true
 
-sched:
-  name: cosine                 # or "step"
-  T_max: ${trainer.epochs}
-  eta_min: 1.0e-6
-  warmup_epochs: 5
-  warmup_lr: 1.0e-6
-  # If using step schedule instead:
-  step_size: 30
-  gamma: 0.1
-
 trainer:
-  epochs: 100
-  log_interval: 50
+  epochs: 50
+  log_interval: 20
   val_interval: 1
   grad_clip_norm: 1.0
   label_smoothing: 0.05
