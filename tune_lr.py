@@ -174,11 +174,6 @@ def tune_loop(
     seed: int,
     device: str,
 ):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-
-    cfg = cfg
     train_loader, val_loader, _ = get_loaders(cfg, root=cfg.data.root)
 
     # Fair starting point
@@ -243,6 +238,14 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
+
+    logger.info(f"Device: {cfg.device} | Bs: {cfg.data.batch_size}")
+
+    torch.set_float32_matmul_precision("high")
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
 
     best = tune_loop(
         cfg,

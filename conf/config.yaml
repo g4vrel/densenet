@@ -16,8 +16,8 @@ hydra:
 data:
   root: data/
   img_size: 224
-  batch_size: 32
-  num_workers: 8
+  batch_size: 128
+  num_workers: 16
   pin_memory: true
   persistent_workers: true
   val_split: 0.10
@@ -34,13 +34,15 @@ model:
 optim:
   name: sgd
   lr: 0.1
-  weight_decay: 1e-4
+  min_lr: 0.001
+  weight_decay: 5e-4
   momentum: 0.9
   nesterov: true
+  warmup_steps: 500
 
 trainer:
   epochs: 50
   log_interval: 20
   val_interval: 1
-  grad_clip_norm: 1.0
+  grad_clip_norm: 10.0
   label_smoothing: 0.05

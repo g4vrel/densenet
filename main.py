@@ -2,6 +2,7 @@ from typing import Tuple
 
 from omegaconf import OmegaConf, DictConfig
 import hydra
+import math
 
 import os
 import numpy as np
@@ -12,7 +13,7 @@ from torch.utils.data import DataLoader
 import wandb
 
 from densenet import densenet121
-from utils import get_loaders, print_steps_info
+from utils import get_loaders, print_steps_info, make_checkpoint
 
 from hydra.utils import get_original_cwd
 from pathlib import Path
@@ -79,6 +80,22 @@ def eval(
     return avg_loss, accuracy
 
 
+def get_lr(config: DictConfig, step: int, batches_per_epoch: int) -> float:
+    """Linear warmup from min_lr -> max_lr, then cosine decay back to min_lr."""
+    warmup = int(config.optim.warmup_steps)
+    total = batches_per_epoch * int(config.trainer.epochs)
+    max_lr = float(config.optim.lr)
+    min_lr = float(config.optim.min_lr)
+
+    s = max(0, min(step, total))
+
+    if s < warmup:
+        return min_lr + (max_lr - min_lr) * (s / max(warmup, 1))
+
+    t = (s - warmup) / max(total - warmup, 1)
+    return min_lr + 0.5 * (max_lr - min_lr) * (1.0 + math.cos(math.pi * t))
+
+
 def train_step(
     cfg: DictConfig,
     model: Module,
@@ -88,6 +105,8 @@ def train_step(
     batch: Tuple[torch.Tensor, torch.Tensor],
     device_type: str,
     clip_grad_fn,
+    step: int,
+    batches_per_epoch: int,
 ) -> Tuple[float, float, int, int]:
     """Runs a single optimization step on one batch."""
     model.train()
@@ -102,6 +121,11 @@ def train_step(
     scaler.scale(loss).backward()
     scaler.unscale_(optim)
     grad = float(clip_grad_fn(model))
+
+    lr_t = get_lr(cfg, step, batches_per_epoch)
+    for g in optim.param_groups:
+        g["lr"] = lr_t
+
     scaler.step(optim)
     scaler.update()
     optim.zero_grad(set_to_none=True)
@@ -127,6 +151,8 @@ def train(cfg: DictConfig) -> Module:
     train_loader, val_loader, test_loader = get_loaders(cfg, root=cfg.data.root)
     optim, scaler = make_optim_utils(cfg, model)
 
+    batches_per_epoch = len(train_loader)
+
     print_steps_info(train_loader)
 
     clip_grad_fn = lambda m: torch.nn.utils.clip_grad_norm_(
@@ -134,12 +160,23 @@ def train(cfg: DictConfig) -> Module:
     )
 
     step = 0
+    epk = 0
     for epoch in range(cfg.trainer.epochs):
+        epk += 1
         running_loss, correct, seen = 0.0, 0, 0
 
         for batch in train_loader:
             loss_item, grad, corr, bs = train_step(
-                cfg, model, optim, scaler, loss_fn, batch, device_type, clip_grad_fn
+                cfg,
+                model,
+                optim,
+                scaler,
+                loss_fn,
+                batch,
+                device_type,
+                clip_grad_fn,
+                step,
+                batches_per_epoch,
             )
             step += 1
             running_loss += loss_item * bs
@@ -187,6 +224,8 @@ def train(cfg: DictConfig) -> Module:
         )
         wandb.summary["test/loss"] = float(test_loss)
         wandb.summary["test/acc"] = float(test_acc)
+
+    make_checkpoint("final_model.pt", step, epk, model)
 
     return model
 
