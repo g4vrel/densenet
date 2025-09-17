@@ -30,6 +30,7 @@ model:
   init_features: 64
   dropout: 0.0
   num_classes: 37
+  separable_convs: False
 
 optim:
   name: sgd
