@@ -41,13 +41,21 @@ def set_flags(cfg: DictConfig):
 
 
 def make_optim_utils(cfg: DictConfig, model: Module):
-    optim = torch.optim.SGD(
-        model.parameters(),
-        lr=cfg.optim.lr,
-        momentum=cfg.optim.momentum,
-        nesterov=cfg.optim.nesterov,
-        weight_decay=cfg.optim.weight_decay,
-    )
+    optim = None
+    if cfg.optim.name == "SGD":
+        optim = torch.optim.SGD(
+            model.parameters(),
+            lr=cfg.optim.lr,
+            momentum=cfg.optim.momentum,
+            nesterov=cfg.optim.nesterov,
+            weight_decay=cfg.optim.weight_decay,
+        )
+    elif cfg.optim.name == "adamw":
+        optim = torch.optim.AdamW(
+            model.parameters(), lr=cfg.optim.lr, weight_decay=cfg.optim.weight_decay
+        )
+    else:
+        raise ValueError()
     scaler = torch.GradScaler(enabled=bool(cfg.amp))
     return optim, scaler
 
@@ -142,7 +150,7 @@ def train(cfg: DictConfig) -> Module:
     device_type = cfg.device
     lbls = cfg.trainer.label_smoothing
 
-    model = densenet121().to(cfg.device)
+    model = densenet121(separable_convs=cfg.model.separable_convs).to(cfg.device)
     if cfg.compile:
         model = torch.compile(model)
 
