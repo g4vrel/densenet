@@ -1,23 +1,36 @@
+import math
 from typing import List
 
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-def make_conv(inter_channels: int, growth_rate, separable: bool = False) -> nn.Module:
+def make_conv(
+    inter_channels: int,
+    growth_rate,
+    separable: bool = False,
+    num_min_groups: int = 1,
+    dilation: int = 1,
+) -> nn.Module:
     if separable:
         return nn.Sequential(
             nn.Conv2d(
                 inter_channels,
                 inter_channels,
                 kernel_size=3,
-                padding=1,
+                padding=dilation,
                 groups=inter_channels,
                 bias=False,
+                dilation=dilation,
             ),
-            nn.Conv2d(inter_channels, growth_rate, kernel_size=1, bias=False, groups=8),
+            nn.Conv2d(
+                inter_channels,
+                growth_rate,
+                kernel_size=1,
+                bias=False,
+                groups=num_min_groups,
+            ),
         )
     else:
         return nn.Conv2d(
@@ -50,6 +63,8 @@ class DenseLayer(nn.Module):
         growth_rate: int,
         dropout: float = 0.0,
         separable: bool = False,
+        num_min_groups: int = 1,
+        dilation: int = 1,
     ):
         super().__init__()
         self.dropout = dropout
@@ -57,7 +72,9 @@ class DenseLayer(nn.Module):
         self.norm1 = nn.BatchNorm2d(in_channels)
         self.conv1 = nn.Conv2d(in_channels, inter_channels, kernel_size=1, bias=False)
         self.norm2 = nn.BatchNorm2d(inter_channels)
-        self.conv2 = make_conv(inter_channels, growth_rate, separable)
+        self.conv2 = make_conv(
+            inter_channels, growth_rate, separable, num_min_groups, dilation
+        )
 
     def forward(self, prev_feats: list[torch.Tensor]) -> torch.Tensor:
         x = torch.cat(prev_feats, dim=1)
@@ -76,13 +93,22 @@ class DenseBlock(nn.Module):
         growth_rate: int,
         dropout: float = 0.0,
         separable: bool = False,
+        num_min_groups: int = 1,
+        dilation: int = 1,
     ):
         super().__init__()
         layers = []
         channels = in_channels
         for _ in range(num_layers):
             layers.append(
-                DenseLayer(channels, growth_rate, dropout, separable=separable)
+                DenseLayer(
+                    channels,
+                    growth_rate,
+                    dropout,
+                    separable=separable,
+                    num_min_groups=num_min_groups,
+                    dilation=dilation,
+                )
             )
             channels += growth_rate
         self.block = nn.ModuleList(layers)
@@ -121,6 +147,8 @@ class DenseNet(nn.Module):
         init_features: int = 64,
         dropout: float = 0.0,
         separable_convs: bool = False,
+        num_min_groups: int = 1,
+        dilation: int = 1,
     ):
         super().__init__()
 
@@ -131,7 +159,13 @@ class DenseNet(nn.Module):
 
         for i, num_layers in enumerate(block_layers):
             db = DenseBlock(
-                num_layers, channels, growth_rate, dropout, separable=separable_convs
+                num_layers,
+                channels,
+                growth_rate,
+                dropout,
+                separable=separable_convs,
+                num_min_groups=num_min_groups,
+                dilation=dilation,
             )
             blocks.append(db)
             channels = db.out_channels
@@ -166,11 +200,27 @@ class DenseNet(nn.Module):
         return x
 
 
-def densenet121(num_classes: int = 37, separable_convs: bool = False) -> DenseNet:
+def densenet121(
+    num_classes: int = 37,
+    separable_convs: bool = False,
+    num_min_groups: int = 1,
+    dilation: int = 1,
+) -> DenseNet:
     return DenseNet(
         growth_rate=32,
         block_layers=[6, 12, 24, 16],
         compression=0.5,
         num_classes=num_classes,
         separable_convs=separable_convs,
+        num_min_groups=num_min_groups,
+        dilation=dilation,
     )
+
+
+if __name__ == "__main__":
+    model = densenet121(num_classes=37)
+    model.eval()
+    x = torch.randn(2, 3, 224, 224)
+    logits = model(x)
+    print("Output shape:", logits.shape)  # Expect [2, 37]
+    print("Param count (M):", sum(p.numel() for p in model.parameters()) / 1e6)

@@ -1,22 +1,19 @@
+import math
+import os
+from pathlib import Path
 from typing import Tuple
 
-from omegaconf import OmegaConf, DictConfig
 import hydra
-import math
-
-import os
 import numpy as np
 import torch
+import wandb
+from hydra.utils import get_original_cwd
+from omegaconf import DictConfig, OmegaConf
 from torch.nn import Module
 from torch.utils.data import DataLoader
 
-import wandb
-
 from densenet import densenet121
-from utils import get_loaders, print_steps_info, make_checkpoint
-
-from hydra.utils import get_original_cwd
-from pathlib import Path
+from utils import get_loaders, make_checkpoint, print_steps_info
 
 
 def _data_root_and_download(cfg):
@@ -150,7 +147,11 @@ def train(cfg: DictConfig) -> Module:
     device_type = cfg.device
     lbls = cfg.trainer.label_smoothing
 
-    model = densenet121(separable_convs=cfg.model.separable_convs).to(cfg.device)
+    model = densenet121(
+        separable_convs=cfg.model.separable_convs,
+        num_min_groups=cfg.model.num_min_groups,
+        dilation=cfg.model.dilation,
+    ).to(cfg.device)
     if cfg.compile:
         model = torch.compile(model)
 

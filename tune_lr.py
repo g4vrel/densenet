@@ -1,13 +1,11 @@
 import argparse
 import copy
+import logging
 import math
 import random
-
-import logging
 import sys
 from pathlib import Path
-
-from typing import Tuple, Dict, Any, List
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import torch

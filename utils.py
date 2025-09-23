@@ -1,14 +1,14 @@
 import math
 
 import torch
-from torchvision import datasets
-from torch.utils.data import DataLoader, Subset
 import torchvision.transforms.v2 as v2
+from torch.utils.data import DataLoader, Subset
+from torchvision import datasets
 
 
 def get_loaders(config, root="data/"):
-    imagenet_mean = (0.484, 0.456, 0.397)
-    imagenet_std = (0.261, 0.255, 0.262)
+    mu = (0.484, 0.456, 0.397)
+    sigma = (0.261, 0.255, 0.262)
 
     size = config.data.img_size
     bs = config.data.batch_size
@@ -18,18 +18,11 @@ def get_loaders(config, root="data/"):
 
     train_transform = v2.Compose(
         [
-            v2.ToImage(),  # ensures PIL/Image -> image tensor pipeline compatibility for v2 ops
-            v2.RandomResizedCrop(
-                size, scale=(0.7, 1.0), ratio=(3 / 4, 4 / 3), antialias=True
-            ),
-            v2.RandomHorizontalFlip(p=0.5),
-            v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
-            # optional mild blur (wrap in RandomApply to do it only sometimes)
-            v2.RandomApply([v2.GaussianBlur(kernel_size=3)], p=0.2),
-            v2.ToDtype(torch.float32, scale=True),  # convert to float tensor in [0,1]
-            v2.Normalize(imagenet_mean, imagenet_std),
-            # RandomErasing works on tensors, keep after ToDtype/Normalize
-            v2.RandomErasing(p=0.25, scale=(0.02, 0.33)),
+            v2.ToImage(),
+            v2.Resize(256, antialias=True),
+            v2.CenterCrop(size),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mu, sigma),
         ]
     )
 
@@ -39,7 +32,7 @@ def get_loaders(config, root="data/"):
             v2.Resize(256, antialias=True),
             v2.CenterCrop(size),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(imagenet_mean, imagenet_std),
+            v2.Normalize(mu, sigma),
         ]
     )
 
