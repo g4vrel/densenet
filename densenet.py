@@ -1,9 +1,32 @@
 import math
-from typing import List
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def make_norm(num_channels: int, norm_type: str = "batch") -> nn.Module:
+    norm_type = (norm_type or "batch").lower()
+    if norm_type == "batchnorm":
+        return nn.BatchNorm2d(num_channels)
+    elif norm_type == "layernorm":
+        return nn.GroupNorm(1, num_channels, affine=True)
+    else:
+        raise ValueError(f"Unknown norm_type: {norm_type}")
+
+
+def make_dropout(p: float, dropout_type: str = "standard") -> nn.Module:
+    p = float(p or 0.0)
+    if p <= 0.0:
+        return nn.Identity()
+    dt = (dropout_type or "standard").lower()
+    if dt in "standard":
+        return nn.Dropout(p)
+    elif dt in "spatial":
+        return nn.Dropout2d(p)
+    else:
+        raise ValueError(f"Unknown dropout_type: {dropout_type}")
 
 
 def make_conv(
@@ -44,16 +67,31 @@ def make_stem(init_features: int, separable: bool = False) -> nn.Module:
             nn.Conv2d(3, 3, kernel_size=7, stride=2, padding=3, groups=3, bias=False),
             nn.Conv2d(3, init_features, kernel_size=1, bias=False),
             nn.BatchNorm2d(init_features),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
         )
     else:
         return nn.Sequential(
             nn.Conv2d(3, init_features, kernel_size=7, stride=2, padding=3, bias=False),
             nn.BatchNorm2d(init_features),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
         )
+
+
+class SE(nn.Module):
+    def __init__(self, c, r=8):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(c, c // r, 1, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(c // r, c, 1, bias=True),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        return x * self.fc(x)
 
 
 class DenseLayer(nn.Module):
@@ -65,23 +103,27 @@ class DenseLayer(nn.Module):
         separable: bool = False,
         num_min_groups: int = 1,
         dilation: int = 1,
+        norm_type: str = "batch",
+        dropout_type: str = "standard",
     ):
         super().__init__()
         self.dropout = dropout
         inter_channels = 4 * growth_rate
-        self.norm1 = nn.BatchNorm2d(in_channels)
+        self.norm1 = make_norm(in_channels, norm_type)
         self.conv1 = nn.Conv2d(in_channels, inter_channels, kernel_size=1, bias=False)
-        self.norm2 = nn.BatchNorm2d(inter_channels)
+        self.norm2 = make_norm(inter_channels, norm_type)
         self.conv2 = make_conv(
             inter_channels, growth_rate, separable, num_min_groups, dilation
         )
+        self.drop = make_dropout(dropout, dropout_type)
+        self.se = SE(growth_rate, r=16)
 
     def forward(self, prev_feats: list[torch.Tensor]) -> torch.Tensor:
         x = torch.cat(prev_feats, dim=1)
-        out = self.conv1(F.relu(self.norm1(x), inplace=True))
-        out = self.conv2(F.relu(self.norm2(out), inplace=True))
-        if self.dropout and self.training:
-            out = F.dropout(out, p=self.dropout)
+        out = self.conv1(F.relu(self.norm1(x)))
+        out = self.conv2(F.relu(self.norm2(out)))
+        out = self.se(out)
+        out = self.drop(out)
         return out
 
 
@@ -92,6 +134,8 @@ class DenseBlock(nn.Module):
         in_channels: int,
         growth_rate: int,
         dropout: float = 0.0,
+        dropout_type: str = "standard",
+        norm_type: str = "batch",
         separable: bool = False,
         num_min_groups: int = 1,
         dilation: int = 1,
@@ -104,7 +148,9 @@ class DenseBlock(nn.Module):
                 DenseLayer(
                     channels,
                     growth_rate,
-                    dropout,
+                    dropout=dropout,
+                    dropout_type=dropout_type,
+                    norm_type=norm_type,
                     separable=separable,
                     num_min_groups=num_min_groups,
                     dilation=dilation,
@@ -119,7 +165,8 @@ class DenseBlock(nn.Module):
         for layer in self.block:
             feat = layer(feats)
             feats.append(feat)
-        return torch.cat(feats, 1)
+        out = torch.cat(feats, 1)
+        return out
 
 
 class Transition(nn.Module):
@@ -132,7 +179,7 @@ class Transition(nn.Module):
         self.out_channels = out_channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv(F.relu(self.norm(x), inplace=True))
+        x = self.conv(F.relu(self.norm(x)))
         x = self.pool(x)
         return x
 
@@ -149,6 +196,8 @@ class DenseNet(nn.Module):
         separable_convs: bool = False,
         num_min_groups: int = 1,
         dilation: int = 1,
+        dropout_type: str = "standard",
+        norm_type: str = "batch",
     ):
         super().__init__()
 
@@ -162,7 +211,9 @@ class DenseNet(nn.Module):
                 num_layers,
                 channels,
                 growth_rate,
-                dropout,
+                dropout=dropout,
+                dropout_type=dropout_type,
+                norm_type=norm_type,
                 separable=separable_convs,
                 num_min_groups=num_min_groups,
                 dilation=dilation,
@@ -176,7 +227,7 @@ class DenseNet(nn.Module):
                 channels = tr.out_channels
 
         self.features = nn.Sequential(*blocks)
-        self.norm_final = nn.BatchNorm2d(channels)
+        self.norm_final = make_norm(channels, norm_type)
         self.classifier = nn.Linear(channels, num_classes)
         self.apply(self._init)
 
@@ -194,7 +245,7 @@ class DenseNet(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)
         x = self.features(x)
-        x = F.relu(self.norm_final(x), inplace=True)
+        x = F.relu(self.norm_final(x))
         x = F.adaptive_avg_pool2d(x, output_size=1).flatten(1)
         x = self.classifier(x)
         return x
@@ -205,6 +256,9 @@ def densenet121(
     separable_convs: bool = False,
     num_min_groups: int = 1,
     dilation: int = 1,
+    dropout: float = 0.0,
+    dropout_type: str = "standard",
+    norm_type: str = "batch",
 ) -> DenseNet:
     return DenseNet(
         growth_rate=32,
@@ -214,6 +268,9 @@ def densenet121(
         separable_convs=separable_convs,
         num_min_groups=num_min_groups,
         dilation=dilation,
+        dropout=dropout,
+        dropout_type=dropout_type,
+        norm_type=norm_type,
     )
 
 

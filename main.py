@@ -151,6 +151,9 @@ def train(cfg: DictConfig) -> Module:
         separable_convs=cfg.model.separable_convs,
         num_min_groups=cfg.model.num_min_groups,
         dilation=cfg.model.dilation,
+        dropout=cfg.model.dropout,
+        dropout_type=cfg.model.dropout_type,
+        norm_type=cfg.model.norm_type,
     ).to(cfg.device)
     if cfg.compile:
         model = torch.compile(model)

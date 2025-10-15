@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from utils import get_loaders
 
 from densenet import densenet121
-from utils import get_loaders
 
 
 def make_logger(log_path: str = "lr_log.txt", level=logging.INFO):

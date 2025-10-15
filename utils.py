@@ -6,25 +6,58 @@ from torch.utils.data import DataLoader, Subset
 from torchvision import datasets
 
 
-def get_loaders(config, root="data/"):
-    mu = (0.484, 0.456, 0.397)
-    sigma = (0.261, 0.255, 0.262)
+def make_norm(cfg):
+    spec = cfg.data.norm
+    assert spec in ["z_imagenet", "z", "div255", "minus_one"]
+    if spec == "z_imagenet":
+        mu = (0.485, 0.456, 0.406)
+        sigma = (0.229, 0.224, 0.225)
+    if spec == "z":
+        mu = (0.484, 0.456, 0.397)
+        sigma = (0.261, 0.255, 0.262)
+    if spec == "div255":
+        mu = (0.0, 0.0, 0.0)
+        sigma = (1.0, 1.0, 1.0)
+    if spec == "minus_one":
+        mu = (0.5, 0.5, 0.5)
+        sigma = (0.5, 0.5, 0.5)
 
+    comp = [v2.ToDtype(torch.float32, scale=True), v2.Normalize(mu, sigma)]
+    return comp
+
+
+def get_loaders(config, root="data/"):
     size = config.data.img_size
     bs = config.data.batch_size
     j = config.data.num_workers
     val_split = config.data.val_split
     seed = config.seed
 
-    train_transform = v2.Compose(
-        [
-            v2.ToImage(),
-            v2.Resize(256, antialias=True),
-            v2.CenterCrop(size),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mu, sigma),
-        ]
-    )
+    train_transform = None
+    if config.data.aug:
+        train_transform = v2.Compose(
+            [
+                v2.ToImage(),
+                v2.RandomResizedCrop(
+                    size, scale=(0.7, 1.0), ratio=(3 / 4, 4 / 3), antialias=True
+                ),
+                v2.RandomHorizontalFlip(p=0.5),
+                v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+                v2.RandomApply([v2.GaussianBlur(kernel_size=3)], p=0.2),
+                v2.ToDtype(torch.float32, scale=True),
+                *make_norm(config),
+                v2.RandomErasing(p=0.25, scale=(0.02, 0.33)),
+            ]
+        )
+    else:
+        train_transform = v2.Compose(
+            [
+                v2.ToImage(),
+                v2.Resize(256, antialias=True),
+                v2.CenterCrop(size),
+                *make_norm(config),
+            ]
+        )
 
     test_transform = v2.Compose(
         [
@@ -32,7 +65,7 @@ def get_loaders(config, root="data/"):
             v2.Resize(256, antialias=True),
             v2.CenterCrop(size),
             v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mu, sigma),
+            *make_norm(config),
         ]
     )
 
@@ -75,7 +108,7 @@ def get_loaders(config, root="data/"):
         shuffle=False,
         num_workers=j,
         pin_memory=True,
-        drop_last=False,
+        drop_last=True,
         persistent_workers=(j > 0),
         prefetch_factor=4,
     )
@@ -86,7 +119,7 @@ def get_loaders(config, root="data/"):
         shuffle=False,
         num_workers=j,
         pin_memory=True,
-        drop_last=False,
+        drop_last=True,
         persistent_workers=(j > 0),
         prefetch_factor=4,
     )
